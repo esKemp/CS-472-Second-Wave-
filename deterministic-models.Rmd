@@ -155,7 +155,7 @@ compute_cumulative_infection_time(output_handwash_seir)
 
 # Basic SEIR with handwashing - affects infectious and susceptible
 
-We could model this with two separate E compartments -- E1 would be people exposed to covid, but they could eliminate infection by handwashing, and E2 would be people who are exposed and are incubating the virus.
+Model assuming handwashing impacts infectious and exposed people
 
 ```{r}
 handwash_SI_SEIR<-function(t, state, parameters) {
@@ -215,7 +215,85 @@ output_handwash_si_seir %>% show_SEIR_model_results()
 compute_cumulative_infection_time(output_handwash_si_seir)
 ```
 
-# Analysis for basic SEIR with handwashing
+
+# SEIR model with two E compartments
+
+This model assumes that once a person is exposed, they can either (1) wash hands and return to the S compartment, or (2) continue on to experience incubation in E2 and then develop an infection in I. People in I can wash hands and reduce the transmission to people they come in contact with.
+
+```{r}
+handwash_SI2E_SEIR<-function(t, state, parameters) {
+    with(as.list(c(state, parameters)),{
+        N <- S + E1 + E2 + I + R
+        
+        dW <- -theta*W + p*(N - W)
+        
+        dS <- -beta1*S*(1 - W/N)*(I/N) - beta2*S*(W/N)*(I/N) + birth*N - death*S + omega*R + alpha*(W/N)*E1
+        dE1 <- beta1*S*(1 - W/N)*(I/N) + beta2*S*(W/N)*(I/N) - alpha*(W/N)*E1 - (1 - alpha*(W/N))*E1
+        dE2 <- (1 - alpha*(W/N))*E1 - sigma*E2 - death*E2
+        dI <- sigma*E2 - death*I - gamma*I
+        dR <- gamma*I - death*R - omega*R
+        
+        # return the rates of change as a list
+        list(c(dS, dE1, dE2, dI, dR, dW))
+    })
+}
+```
+
+
+Parameters
+```{r}
+R0 <- 2.2
+latent <- 3
+infectious <- 7
+lambda <- .2 #this is the percent by which handwashing reduces effective contact rate
+p <- .2 #prob that someone washes hands
+theta <- .2 #rate that handwashing wears off
+alpha <- .2 #proportion of people with washed hands in E1 return to susceptible (AKA, dont become infectious)
+
+birth <- 0
+death <- 0
+omega <- 0 #waning immunity
+gamma <- 1/infectious #recovery rate
+sigma <- 1/latent
+beta1 <- R0*gamma #effective contact rate
+beta2 <- (1 - lambda)*beta1
+```
+
+Run model
+
+```{r}
+show_SE2IR_model_results<-function(df1) {
+    df1 %>% as_tibble() %>% mutate(S = as.numeric(S), E1 = as.numeric(E1), E2 = as.numeric(E2), I = as.numeric(I), R = as.numeric(R)) %>%
+    pivot_longer(cols = c("S", "E1", "E2", "I", "R"), names_to = "compartment", values_to = "count") %>%
+    mutate(compartment = factor(compartment, levels = c("S", "E1", "E2", "I", "R"))) %>% 
+    ggplot(aes(x = time, y = count, color = compartment)) +
+        geom_line() +
+        xlab('Time') +
+        ylab('Count') 
+}
+```
+
+
+```{r}
+state <- c(S = 999999, #population of 1,000,000, 1 person starts of infected
+           E1 = 0,
+           E2 = 0,
+           I = 1, 
+           R = 0,
+           W = 0
+)
+
+T_end <- 500 #run model for 500 time steps
+times <- seq(0, T_end, by = 1) #runs the model for 500 time steps, and computes output at each time step 
+
+output_handwash_si2e_seir <- ode(y = state, times = times, func = handwash_SI2E_SEIR, parms = c(beta1, beta2, gamma, omega, sigma, birth, death, p, theta, alpha))
+
+output_handwash_si2e_seir %>% show_SE2IR_model_results()
+
+compute_cumulative_infection_time(output_handwash_si2e_seir)
+```
+
+# Analysis
 
 ```{r}
 
