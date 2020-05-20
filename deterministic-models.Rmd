@@ -2,11 +2,7 @@
 title: "deterministic-models"
 author: "Emily Guthrie"
 date: "5/18/2020"
-output: pdf_document
----
----
-title: "R Notebook"
-output: pdf_document
+output: html_document
 ---
 
 ```{r}
@@ -246,7 +242,7 @@ R0 <- 2.2
 latent <- 3
 infectious <- 7
 lambda <- .2 #this is the percent by which handwashing reduces effective contact rate
-p <- .2 #prob that someone washes hands
+p <- .2 #prob that someone washes hands effectively
 theta <- .2 #rate that handwashing wears off
 alpha <- .2 #proportion of people with washed hands in E1 return to susceptible (AKA, dont become infectious)
 
@@ -302,9 +298,9 @@ compute_cumulative_infection_time(output_handwash_si2e_seir)
 
 Potential additions:
 
-Age stratification
-Isolation upon symptom onset
-Assumptions about number of visits out of the house per week
-Population density (impacts beta)
+* Age stratification  
+* Isolation upon symptom onset  
+* Assumptions about number of visits out of the house per week  
+* Population density (impacts beta)  
 
 ALSO, we can do analysis based on not just CIT but also peak number of infecteds, peak number of people in the hospital, time until peak, etc.
