@@ -1,0 +1,180 @@
+---
+title: "handwashing-shiny"
+author: "Emily Guthrie"
+date: "6/5/2020"
+output: html_document
+---
+
+```{r}
+library(deSolve)
+library(plsgenomics)
+library(tidyverse)
+library(knitr)
+library(shiny)
+library(shinythemes)
+```
+
+From literature:
+R0 is 2.2
+duration for E is 3
+duration for I is 7
+
+```{r}
+handwash_SI2E_SEIR<-function(t, state, parameters) {
+    with(as.list(c(state, parameters)),{
+        N <- S + E1 + E2 + I + R
+        
+        dW <- -theta*W + p*(N - W)
+        
+        dS <- -beta1*S*(1 - W/N)*(I/N) - beta2*S*(W/N)*(I/N) + birth*N - death*S + omega*R + alpha*(W/N)*E1
+        dE1 <- beta1*S*(1 - W/N)*(I/N) + beta2*S*(W/N)*(I/N) - alpha*(W/N)*E1 - (1 - alpha*(W/N))*E1
+        dE2 <- (1 - alpha*(W/N))*E1 - sigma*E2 - death*E2
+        dI <- sigma*E2 - death*I - gamma*I
+        dR <- gamma*I - death*R - omega*R
+        
+        # return the rates of change as a list
+        list(c(dS, dE1, dE2, dI, dR, dW))
+    })
+}
+
+compute_cumulative_infection_time<-function(output) {
+    df1 <- data.frame(output)
+    return(sum(df1$I))
+}
+```
+
+```{r}
+show_SE2IR_model_results<-function(df1) {
+    df1 %>% as_tibble() %>% mutate(S = as.numeric(S), E1 = as.numeric(E1), E2 = as.numeric(E2), I = as.numeric(I), R = as.numeric(R)) %>%
+        pivot_longer(cols = c("S", "E1", "E2", "I", "R"), names_to = "compartment", values_to = "count") %>%
+        mutate(compartment = factor(compartment, levels = c("S", "E1", "E2", "I", "R"))) %>% 
+        filter(compartment == "S" | compartment == "I" | compartment == "R") %>% 
+        ggplot(aes(x = time, y = count, color = compartment)) +
+        geom_line() +
+        xlab('Time') +
+        ylab('Count') +
+        theme_light()
+}
+
+show_SE2IR_model_conditions<-function(df1) {
+    df1 %>% as_tibble() %>% select(-S, E1, -E2, -R) %>% 
+        mutate(infections = I, hospitalizations = I*.2, fatalities = I*.01) %>% 
+        pivot_longer(cols = c("infections", "hospitalizations", "fatalities"), names_to = "compartment", values_to = "count") %>% 
+        mutate(compartment = factor(compartment, levels = c("infections", "hospitalizations", "fatalities"))) %>% 
+        ggplot(aes(x = time, y = count, color = compartment)) +
+        geom_line() +
+        xlab('Time') +
+        ylab('Count') +
+        theme_light() +
+        ylim(0, 80000)
+}
+```
+
+
+```{r}
+R0 <- 2.2
+latent <- 3
+infectious <- 7
+lambda <- .2 #this is the percent by which handwashing reduces effective contact rate
+p <- .2 #prob that someone washes hands effectively
+theta <- .2 #rate that handwashing wears off
+alpha <- .2 #proportion of people with washed hands in E1 return to susceptible (AKA, dont become infectious)
+
+birth <- 0
+death <- 0
+omega <- 0 #waning immunity
+gamma <- 1/infectious #recovery rate
+sigma <- 1/latent
+beta1 <- R0*gamma #effective contact rate
+beta2 <- (1 - lambda)*beta1
+```
+
+```{r}
+state <- c(S = 999999, #population of 1,000,000, 1 person starts of infected
+           E1 = 0,
+           E2 = 0,
+           I = 1, 
+           R = 0,
+           W = 0
+)
+
+T_end <- 1000 #run model for 1000 time steps
+times <- seq(0, T_end, by = 1) #runs the model for 1-00 time steps, and computes output at each time step 
+
+output_handwash_si2e_seir <- ode(y = state, times = times, func = handwash_SI2E_SEIR, parms = c(beta1, beta2, gamma, omega, sigma, birth, death, p, theta, alpha))
+
+output_handwash_si2e_seir %>% show_SE2IR_model_results()
+
+compute_cumulative_infection_time(output_handwash_si2e_seir)
+```
+
+lambda <- .2 #this is the percent by which handwashing reduces effective contact rate
+p <- .2 #prob that someone washes hands effectively
+theta <- .2 #rate that handwashing wears off
+alpha <- .2 #proportion of people with washed hands in E1 return to susceptible (AKA, dont become infectious)
+```{r}
+# Define UI
+ui <- fluidPage(theme = shinytheme("lumen"),
+                titlePanel("Impact of Handwashing on COVID-19"),
+                sidebarLayout(
+                    sidebarPanel(
+                        
+                        # Select date range to be plotted
+                        sliderInput(inputId = "lambda", label = "lambda", min = 0, max = .7, value = .4, step = .1, round = -1, ticks = TRUE),
+                        sliderInput(inputId = "p", label = "p", min = 0, max = .7, value = .2, step = .1, round = -1, ticks = TRUE),
+                        sliderInput(inputId = "theta", label = "theta", min = 0, max = 1, value = .2, step = .1, round = -1, ticks = TRUE),
+                        sliderInput(inputId = "alpha", label = "alpha", min = 0, max = .7, value = .2, step = .1, round = -1, ticks = TRUE)
+                    ),
+                    
+                    # Output: Description, lineplot, and reference
+                    mainPanel(
+                        plotOutput(outputId = "lineplot", height = "300px"),
+                        textOutput(outputId = "infection_time"),
+                        textOutput(outputId = "hospitalizations"),
+                        textOutput(outputId = "deaths"),
+                        tags$a(href = "https://www.google.com/finance/domestic_trends", "Source: Google Domestic Trends", target = "_blank")
+                    )
+                )
+)
+
+# Define server function
+server <- function(input, output) {
+    
+    # Subset data
+    selected_trends <- reactive({
+        req(input$lambda, input$alpha, input$p, input$theta)
+        ode(y = state, times = times, func = handwash_SI2E_SEIR, parms = c(beta1, beta2 = (1 - input$lambda)*beta1, gamma, omega, sigma, birth, death, p = input$p, theta = input$theta, alpha = input$alpha))
+    })
+    
+    analysis <- reactive({
+        data <- selected_trends() %>% as_tibble()
+        c(sum(data$I), max(data$I)*.2, sum(data$I)*.01)
+    })
+    
+    # Create scatterplot object the plotOutput function is expecting
+    output$lineplot <- renderPlot({
+        show_SE2IR_model_conditions(selected_trends())
+    })
+    
+    output$infection_time <- renderText({
+        paste("Cumulative infection time:", floor(analysis()[[1]]))
+    })
+    
+    output$hospitalizations <- renderText({
+        paste("Peak hospitalizations:", floor(analysis()[[2]]))
+    })
+    
+     output$deaths <- renderText({
+        paste("Cumulative deaths:", floor(analysis()[[3]]))
+    })
+    
+    
+    # # Pull in description of trend
+    # output$desc <- renderText({"The index is set to 1.0 on January 1, 2004 and is calculated only for US search traffic."
+    # })
+}
+
+# Create Shiny object
+shinyApp(ui = ui, server = server)
+```
+
