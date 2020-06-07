@@ -44,36 +44,6 @@ compute_cumulative_infection_time<-function(output) {
 ```
 
 ```{r}
-show_SE2IR_model_results<-function(df1) {
-    df1 %>% as_tibble() %>% mutate(S = as.numeric(S), E1 = as.numeric(E1), E2 = as.numeric(E2), I = as.numeric(I), R = as.numeric(R)) %>%
-        pivot_longer(cols = c("S", "E1", "E2", "I", "R"), names_to = "compartment", values_to = "count") %>%
-        mutate(compartment = factor(compartment, levels = c("S", "E1", "E2", "I", "R"))) %>% 
-        filter(compartment == "S" | compartment == "I" | compartment == "R") %>% 
-        mutate(day = time/24) %>% 
-        ggplot(aes(x = day, y = count, color = compartment)) +
-        geom_line() +
-        xlab('Time') +
-        ylab('Count') +
-        theme_light()
-}
-
-show_SE2IR_model_conditions<-function(df1) {
-    df1 %>% as_tibble() %>% select(-S, E1, -E2, -R) %>% 
-        mutate(infections = I, hospitalizations = I*.2, fatalities = I*.01) %>% 
-        pivot_longer(cols = c("infections", "hospitalizations", "fatalities"), names_to = "compartment", values_to = "count") %>% 
-        mutate(compartment = factor(compartment, levels = c("infections", "hospitalizations", "fatalities"))) %>% 
-        mutate(day = time/24) %>% 
-        ggplot(aes(x = day, y = count, color = compartment)) +
-        geom_line() +
-        xlab('Day') +
-        ylab('Count') +
-        theme_light() +
-        ylim(0, 150000)
-}
-```
-
-
-```{r}
 R0 <- 2.2
 latent <- 3*24
 infectious <- 7*24
@@ -100,20 +70,69 @@ state <- c(S = 999999, #population of 1,000,000, 1 person starts of infected
            W = 0
 )
 
-T_end <- 10000 #run model for 1000 time steps
-times <- seq(0, T_end, by = 1) #runs the model for 1-00 time steps, and computes output at each time step 
-
-output_handwash_si2e_seir <- ode(y = state, times = times, func = handwash_SI2E_SEIR, parms = c(beta1, beta2, gamma, omega, sigma, birth, death, p, theta, alpha))
-
-output_handwash_si2e_seir %>% show_SE2IR_model_results()
-
-compute_cumulative_infection_time(output_handwash_si2e_seir)
+T_end <- 10000 #run model for 10000 time steps
+times <- seq(0, T_end, by = 1) #runs the model for 10000 time steps, and computes output at each time step 
 ```
 
-lambda <- .2 #this is the percent by which handwashing reduces effective contact rate
-p <- .2 #prob that someone washes hands effectively
-theta <- .2 #rate that handwashing wears off
-alpha <- .2 #proportion of people with washed hands in E1 return to susceptible (AKA, dont become infectious)
+```{r}
+show_SE2IR_model_results<-function(df1) {
+    df1 %>% as_tibble() %>% mutate(S = as.numeric(S), E1 = as.numeric(E1), E2 = as.numeric(E2), I = as.numeric(I), R = as.numeric(R)) %>%
+        pivot_longer(cols = c("S", "E1", "E2", "I", "R"), names_to = "compartment", values_to = "count") %>%
+        mutate(compartment = factor(compartment, levels = c("S", "E1", "E2", "I", "R"))) %>% 
+        filter(compartment == "S" | compartment == "I" | compartment == "R") %>% 
+        mutate(day = time/24) %>% 
+        ggplot(aes(x = day, y = count, color = compartment)) +
+        geom_line() +
+        xlab('Time') +
+        ylab('Count') +
+        theme_light()
+}
+
+show_SE2IR_model_conditions<-function(df1) {
+    df1 %>% as_tibble() %>% select(-S, E1, -E2, -R) %>% 
+        mutate(infections = I, hospitalizations = I*.2, fatalities = I*.01) %>% 
+        pivot_longer(cols = c("infections", "hospitalizations", "fatalities"), names_to = "compartment", values_to = "count") %>% 
+        mutate(compartment = factor(compartment, levels = c("infections", "hospitalizations", "fatalities"))) %>% 
+        mutate(day = time/24) %>% 
+        ggplot(aes(x = day, y = count, color = compartment)) +
+        geom_line() +
+        xlab('Day') +
+        ylab('Count') +
+        theme_light() +
+        ylim(0, 150000)
+}
+
+no_handwashing <-
+    ode(y = state, times = times, func = handwash_SI2E_SEIR, parms = c(beta1, beta2 = (1 - 0)*beta1, gamma, omega, sigma, birth, death, p = 0, theta = 0, alpha = 0)) %>% as_tibble()
+
+avg_parms <-
+    ode(y = state, times = times, func = handwash_SI2E_SEIR, parms = c(beta1, beta2 = (1 - .4)*beta1, gamma, omega, sigma, birth, death, p = .2, theta = .9, alpha = .2)) %>% as_tibble()
+
+show_SE2IR_model_comparison <- function(df1){
+    user_data <- df1 %>% as_tibble()
+    
+    models_data <- tribble(
+        ~model, ~metric, ~value,
+        "no handwashing", "cumulative deaths", sum(no_handwashing$I*.01)/24,
+        "no handwashing", "max hospitalizations", max(no_handwashing$I)*.2,
+        "handwashing literature estimates", "cumulative deaths", sum(avg_parms$I*.01)/24,
+        "handwashing literature estimates", "max hospitalizations", max(avg_parms$I)*.2,
+        "current inputs", "cumulative deaths", sum(user_data$I*.01)/24,
+        "current inputs", "max hospitalizations", max(user_data$I)*.2
+    )
+    
+    models_data %>% 
+        mutate(model = factor(model, levels = c("no handwashing", "handwashing literature estimates", "current inputs"))) %>% 
+        ggplot(aes(x = metric, y = value, fill = model)) +
+        geom_bar(stat="identity", position=position_dodge()) +
+        xlab('Metric') +
+        ylab('Count') +
+        theme_light() +
+        scale_fill_brewer(palette="Dark2")
+}
+
+```
+
 ```{r}
 # Define UI
 ui <- fluidPage(theme = shinytheme("lumen"),
@@ -131,9 +150,7 @@ ui <- fluidPage(theme = shinytheme("lumen"),
                     # Output: Description, lineplot, and reference
                     mainPanel(
                         plotOutput(outputId = "lineplot", height = "300px"),
-                        textOutput(outputId = "infection_time"),
-                        textOutput(outputId = "hospitalizations"),
-                        textOutput(outputId = "deaths")
+                        plotOutput(outputId = "barplot", height = "300px")
                     )
                 )
 )
@@ -147,22 +164,12 @@ server <- function(input, output) {
         ode(y = state, times = times, func = handwash_SI2E_SEIR, parms = c(beta1, beta2 = (1 - input$lambda)*beta1, gamma, omega, sigma, birth, death, p = input$p, theta = input$theta, alpha = input$alpha))
     })
     
-    analysis <- reactive({
-        data <- selected_trends() %>% as_tibble()
-        c(max(data$I)*.2, sum(data$I*.01)/24)
-    })
-    
-    # Create scatterplot object the plotOutput function is expecting
     output$lineplot <- renderPlot({
         show_SE2IR_model_conditions(selected_trends())
     })
     
-    output$hospitalizations <- renderText({
-        paste("Peak hospitalizations:", floor(analysis()[[1]]))
-    })
-    
-     output$deaths <- renderText({
-        paste("Cumulative deaths:", floor(analysis()[[2]]))
+    output$barplot <- renderPlot({
+        show_SE2IR_model_comparison(selected_trends())
     })
 }
 
