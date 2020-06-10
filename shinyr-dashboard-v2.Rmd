@@ -49,7 +49,7 @@ latent <- 3*24
 infectious <- 7*24
 lambda <- .2 #this is the percent by which handwashing reduces effective contact rate
 p <- .2 #prob that someone washes hands effectively
-theta <- .2 #prob that handwashing has worn off after one hour
+theta <- 1 #prob that handwashing has worn off after one hour
 alpha <- .2 #proportion of people with washed hands in E1 return to susceptible (AKA, dont become infectious)
 
 birth <- 0
@@ -106,7 +106,7 @@ no_handwashing <-
     ode(y = state, times = times, func = handwash_SI2E_SEIR, parms = c(beta1, beta2 = (1 - 0)*beta1, gamma, omega, sigma, birth, death, p = 0, theta = 0, alpha = 0)) %>% as_tibble()
 
 avg_parms <-
-    ode(y = state, times = times, func = handwash_SI2E_SEIR, parms = c(beta1, beta2 = (1 - .4)*beta1, gamma, omega, sigma, birth, death, p = .2, theta = .9, alpha = .2)) %>% as_tibble()
+    ode(y = state, times = times, func = handwash_SI2E_SEIR, parms = c(beta1, beta2 = (1 - .4)*beta1, gamma, omega, sigma, birth, death, p = .2, theta = 1, alpha = .2)) %>% as_tibble()
 
 show_SE2IR_model_comparison <- function(df1){
     user_data <- df1 %>% as_tibble()
@@ -143,7 +143,6 @@ ui <- fluidPage(theme = shinytheme("lumen"),
                         # Select date range to be plotted
                         sliderInput(inputId = "lambda", label = "lambda", min = 0, max = 1, value = .4, step = .1, round = -1, ticks = TRUE),
                         sliderInput(inputId = "p", label = "p", min = 0, max = 1, value = .2, step = .1, round = -1, ticks = TRUE),
-                        sliderInput(inputId = "theta", label = "theta", min = 0, max = 1, value = .9, step = .1, round = -1, ticks = TRUE),
                         sliderInput(inputId = "alpha", label = "alpha", min = 0, max = 1, value = .2, step = .1, round = -1, ticks = TRUE)
                     ),
                     
@@ -160,8 +159,8 @@ server <- function(input, output) {
     
     # Subset data
     selected_trends <- reactive({
-        req(input$lambda, input$alpha, input$p, input$theta)
-        ode(y = state, times = times, func = handwash_SI2E_SEIR, parms = c(beta1, beta2 = (1 - input$lambda)*beta1, gamma, omega, sigma, birth, death, p = input$p, theta = input$theta, alpha = input$alpha))
+        req(input$lambda, input$alpha, input$p)
+        ode(y = state, times = times, func = handwash_SI2E_SEIR, parms = c(beta1, beta2 = (1 - input$lambda)*beta1, gamma, omega, sigma, birth, death, p = input$p, theta = 1, alpha = input$alpha))
     })
     
     output$lineplot <- renderPlot({
