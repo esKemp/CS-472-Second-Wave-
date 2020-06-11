@@ -134,7 +134,7 @@ show_SE2IR_model_results<-function(df1) {
     theme_light()
 }
 
-show_SE2IR_model_conditions<-function(df1) {
+show_SE2IR_model_conditions<-function(df1, title) {
   df1 %>% as_tibble() %>% select(-S, E1, -E2, -R) %>% 
     mutate(infections = I, hospitalizations = I*.2, fatalities = I*.01) %>% 
     pivot_longer(cols = c("infections", "hospitalizations", "fatalities"), names_to = "compartment", values_to = "count") %>% 
@@ -150,7 +150,8 @@ show_SE2IR_model_conditions<-function(df1) {
     xlab('Day') +
     ylab('Count') +
     theme_light() +
-    ylim(0, 150000)
+    ylim(0, 150000) +
+    ggtitle(title) + theme(plot.title = element_text(size = 30))
 }
 
 no_handwashing <-
@@ -183,3 +184,27 @@ show_SE2IR_model_comparison <- function(df1){
 }
 
 ```
+
+```{r}
+no_alpha <- results %>% filter(alpha == 0) %>% 
+  filter(lambda <= .7, p <= .7)
+```
+
+```{r}
+no_alpha %>% 
+  ggplot(aes(x = p, y = lambda, fill = cum_deaths)) +
+  geom_tile() +
+  scale_fill_gradient(low="white", high="red", limits = c(min(no_alpha$cum_deaths), max(no_alpha$cum_deaths)))
+```
+
+```{r}
+results %>% 
+  filter(alpha == 0, lambda == .4) %>% 
+  ggplot(aes(x = p, y = cum_deaths)) + geom_line() + 
+  xlab('p(individual handwashing properly)') +
+  ylab('Cumulative deaths') +
+  ggtitle("Cumulative deaths versus probability of hand washing") + theme(plot.title = element_text(size = 20))
+
+```
+
+
