@@ -1,0 +1,210 @@
+---
+title: "sensitivity-analysis"
+author: "Emily Guthrie"
+date: "6/10/2020"
+output: html_document
+---
+
+```{r}
+library(deSolve)
+library(plsgenomics)
+library(tidyverse)
+library(knitr)
+library(shiny)
+library(shinythemes)
+```
+
+From literature:
+R0 is 2.2
+duration for E is 3
+duration for I is 7
+
+```{r}
+handwash_SI2E_SEIR<-function(t, state, parameters) {
+  with(as.list(c(state, parameters)),{
+    N <- S + E1 + E2 + I + R
+    
+    dW <- -theta*W + p*(N - W)
+    
+    dS <- -beta1*S*(1 - W/N)*(I/N) - beta2*S*(W/N)*(I/N) + birth*N - death*S + omega*R + alpha*(W/N)*E1
+    dE1 <- beta1*S*(1 - W/N)*(I/N) + beta2*S*(W/N)*(I/N) - alpha*(W/N)*E1 - (1 - alpha*(W/N))*E1
+    dE2 <- (1 - alpha*(W/N))*E1 - sigma*E2 - death*E2
+    dI <- sigma*E2 - death*I - gamma*I
+    dR <- gamma*I - death*R - omega*R
+    
+    # return the rates of change as a list
+    list(c(dS, dE1, dE2, dI, dR, dW))
+  })
+}
+```
+
+```{r}
+R0 <- 2.2
+latent <- 3*24
+infectious <- 7*24
+lambda <- .2 #this is the percent by which handwashing reduces effective contact rate
+p <- .2 #prob that someone washes hands effectively
+theta <- 1 #prob that handwashing has worn off after one hour
+alpha <- .2 #proportion of people with washed hands in E1 return to susceptible (AKA, dont become infectious)
+
+birth <- 0
+death <- 0
+omega <- 0 #waning immunity
+gamma <- 1/infectious #recovery rate
+sigma <- 1/latent
+beta1 <- R0*gamma #effective contact rate
+beta2 <- (1 - lambda)*beta1
+
+state <- c(S = 999999, #population of 1,000,000, 1 person starts of infected
+           E1 = 0,
+           E2 = 0,
+           I = 1, 
+           R = 0,
+           W = 0
+)
+
+T_end <- 10000 #run model for 10000 time steps
+times <- seq(0, T_end, by = 1) #runs the model for 10000 time steps, and computes output at each time step 
+```
+
+```{r}
+call_ode_deaths <-function(params) {
+  output <- ode(y = state, time = times, func = handwash_SI2E_SEIR, parms = params) %>% as_tibble()
+  sum(output$I*.01)/24
+}
+call_ode_hosp<-function(params) {
+  output <- ode(y = state, time = times, func = handwash_SI2E_SEIR, parms = params) %>% as_tibble()
+  max(output$I)*.2
+}
+
+alpha <- c(0:10)/10
+p <- c(0:10)/10
+lambda <- c(0:10)/10
+
+parms <- crossing(alpha, p, lambda) %>% mutate(birth = 0, death = 0, omega = 0, gamma = 1/infectious, sigma = 1/latent, beta1 = R0*gamma, beta2 = (1 - lambda)*beta1)
+
+results <- parms %>% mutate(cum_deaths = apply(parms, 1, call_ode_deaths), max_hospitalizations = apply(parms, 1, call_ode_hosp))
+```
+
+```{r}
+#write_csv(results, "handwashing-sensitivity-analysis.csv")
+```
+
+Block to create the 3d graph:
+```{r}
+library(plotly)
+library(tidyverse)
+
+results <- read_csv("handwashing-sensitivity-analysis.csv")
+
+results2 <- results %>% 
+  filter(lambda <= .7, alpha <= .7)
+
+fig <- plot_ly(results2, x=~alpha, y=~p, z=~lambda, type="scatter3d", mode="markers", color=~cum_deaths, 
+               hoverinfo = 'text',
+               text = ~paste('</br> alpha: ', alpha,
+                             '</br> p: ', p,
+                             '</br> lambda: ', lambda,
+                             '</br> total deaths: ', as.integer(cum_deaths)))
+
+fig <- fig %>% layout(
+  title = "Variation in deaths by model parameters",
+  scene = list(
+    xaxis = list(title = "alpha"),
+    yaxis = list(title = "p"),
+    zaxis = list(title = "lambda")
+  ))
+
+fig
+```
+
+
+
+```{r}
+show_SE2IR_model_results<-function(df1) {
+  df1 %>% as_tibble() %>% mutate(S = as.numeric(S), E1 = as.numeric(E1), E2 = as.numeric(E2), I = as.numeric(I), R = as.numeric(R)) %>%
+    pivot_longer(cols = c("S", "E1", "E2", "I", "R"), names_to = "compartment", values_to = "count") %>%
+    mutate(compartment = factor(compartment, levels = c("S", "E1", "E2", "I", "R"))) %>% 
+    filter(compartment == "S" | compartment == "I" | compartment == "R") %>% 
+    mutate(day = time/24) %>% 
+    ggplot(aes(x = day, y = count, color = compartment)) +
+    geom_line() +
+    xlab('Time') +
+    ylab('Count') +
+    theme_light()
+}
+
+show_SE2IR_model_conditions<-function(df1, title) {
+  df1 %>% as_tibble() %>% select(-S, E1, -E2, -R) %>% 
+    mutate(infections = I, hospitalizations = I*.2, fatalities = I*.01) %>% 
+    pivot_longer(cols = c("infections", "hospitalizations", "fatalities"), names_to = "compartment", values_to = "count") %>% 
+    mutate(compartment = factor(compartment, levels = c("infections", "hospitalizations", "fatalities"))) %>% 
+    mutate(day = as.numeric(time/24)) %>% 
+    mutate(day = case_when(
+      compartment == "hospitalizations" ~ day + 14,
+      compartment == "fatalities" ~ day + 21,
+      TRUE ~ day
+    )) %>% 
+    ggplot(aes(x = day, y = count, color = compartment)) +
+    geom_line() +
+    xlab('Day') +
+    ylab('Count') +
+    theme_light() +
+    ylim(0, 150000) +
+    ggtitle(title) + theme(plot.title = element_text(size = 30))
+}
+
+no_handwashing <-
+  ode(y = state, times = times, func = handwash_SI2E_SEIR, parms = c(beta1, beta2 = (1 - 0)*beta1, gamma, omega, sigma, birth, death, p = 0, theta = 0, alpha = 0)) %>% as_tibble()
+
+avg_parms <-
+  ode(y = state, times = times, func = handwash_SI2E_SEIR, parms = c(beta1, beta2 = (1 - .4)*beta1, gamma, omega, sigma, birth, death, p = .2, theta = 1, alpha = .2)) %>% as_tibble()
+
+show_SE2IR_model_comparison <- function(df1){
+  user_data <- df1 %>% as_tibble()
+  
+  models_data <- tribble(
+    ~model, ~metric, ~value,
+    "no handwashing", "cumulative deaths", sum(no_handwashing$I*.01)/24,
+    "no handwashing", "max hospitalizations", max(no_handwashing$I)*.2,
+    "handwashing literature estimates", "cumulative deaths", sum(avg_parms$I*.01)/24,
+    "handwashing literature estimates", "max hospitalizations", max(avg_parms$I)*.2,
+    "current inputs", "cumulative deaths", sum(user_data$I*.01)/24,
+    "current inputs", "max hospitalizations", max(user_data$I)*.2
+  )
+  
+  models_data %>% 
+    mutate(model = factor(model, levels = c("no handwashing", "handwashing literature estimates", "current inputs"))) %>% 
+    ggplot(aes(x = metric, y = value, fill = model)) +
+    geom_bar(stat="identity", position=position_dodge()) +
+    xlab('Metric') +
+    ylab('Count') +
+    theme_light() +
+    scale_fill_brewer(palette="Dark2")
+}
+
+```
+
+```{r}
+no_alpha <- results %>% filter(alpha == 0) %>% 
+  filter(lambda <= .7, p <= .7)
+```
+
+```{r}
+no_alpha %>% 
+  ggplot(aes(x = p, y = lambda, fill = cum_deaths)) +
+  geom_tile() +
+  scale_fill_gradient(low="white", high="red", limits = c(min(no_alpha$cum_deaths), max(no_alpha$cum_deaths)))
+```
+
+```{r}
+results %>% 
+  filter(alpha == 0, lambda == .4) %>% 
+  ggplot(aes(x = p, y = cum_deaths)) + geom_line() + 
+  xlab('p(individual handwashing properly)') +
+  ylab('Cumulative deaths') +
+  ggtitle("Cumulative deaths versus probability of hand washing") + theme(plot.title = element_text(size = 20))
+
+```
+
+
